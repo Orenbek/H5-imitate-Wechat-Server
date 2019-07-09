@@ -1,0 +1,19 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "dependencies": {
+    "http": "0.0.0",
+    "mosca": "^2.8.3",
+    "mqtt": "^3.0.0",
+    "nodejs-websocket": "^1.7.2",
+    "wx": "0.0.36"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
