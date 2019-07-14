@@ -59,16 +59,23 @@ wss.on('connection', function connection(ws, req) {
         ws.send(JSON.stringify(userList));
 
         if (message.state === 'launch') {
-            ws.faceobj = objectId[0];
-            ws.facestate = 'connecting';
-            // faceTimeOject.set(userid, {
-            //     client: ws,
-            //     faceobj: objectId[0],
-            //     facestate: 'connecting'
-            // });
-            faceTimeOject.set(userid, ws);
-            //目前只考虑两人之间视频。
-            //发送请求连接消息
+            let faceClient =  faceTimeOject.get(objectId[0]);
+            if(faceClient.state!=='connected'){
+                ws.faceobj = objectId[0];
+                ws.facestate = 'connecting';
+                // faceTimeOject.set(userid, {
+                //     client: ws,
+                //     faceobj: objectId[0],
+                //     facestate: 'connecting'
+                // });
+                faceTimeOject.set(userid, ws);
+                //目前只考虑两人之间视频。
+                //发送请求连接消息
+            } else{
+                message.state = 'reject';
+                ws.send(JSON.stringify(message));
+                //对方正在通话
+            }
         }
         if (message.state === 'accept') {
             ws.faceobj = objectId[0];
@@ -79,6 +86,13 @@ wss.on('connection', function connection(ws, req) {
             faceTimeOject.set(objectId[0], faceClient);
             //更新自己和对方的状态为已连接。
             //发送接受连接消息
+        }
+        if (message.state === 'reject'){
+            let faceClient = faceTimeOject.get(objectId[0]);
+            faceClient.faceobj = '';
+            faceClient.facestate = '';
+            faceTimeOject.delete(objectId[0]);
+            //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
         }
         if (message.state === 'break') {
             ws.faceobj = '';
