@@ -4,10 +4,12 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
+    "form-data": "^2.5.0",
     "http": "0.0.0",
     "mosca": "^2.8.3",
     "mqtt": "^3.0.0",
     "nodejs-websocket": "^1.7.2",
+    "uuid": "^3.3.2",
     "wx": "0.0.36"
   },
   "devDependencies": {},
