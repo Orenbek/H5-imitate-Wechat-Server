@@ -8,103 +8,140 @@ const wss = new WebSocket.Server({
     server,
     clientTracking: true,
     backlog: 50
-},callBack); //创建一个WebSocketServer的实例，监听端口8000
+}, callBack); //创建一个WebSocketServer的实例，监听端口8000
 
 // message.state: 'launch','accept','break'
-// var userList = [];
 var objectId = [];
 var radioBuffer = [];
-var faceTimeOject = [];
-wss.on('connection', function connection(ws,req) {
+var faceTimeOject = new Map();
+wss.on('connection', function connection(ws, req) {
     // if(userList){
     //     ws.send(JSON.stringify(userList));
     // } else{
     //     ws.send('[]');
     // }
-    
+
     ws.on('message', function incoming(message) {
 
-        if(typeof message ==='object'){
-        let random = uuidv1();
-        radioBuffer[random]=message;
-        let res = JSON.stringify({type:'hash',random: random})
-        console.log('random is ',random);
-        ws.send(res);
-        } else {
-            console.log('received: %s', message);
-            message = JSON.parse(message);
-            let userid = message.userid;
-            objectId = message.objectid;
-            ws.userid = userid;
-            var userList = [];
-            wss.clients.forEach(client => {
-                    userList.push(client.userid);
-                    userList = Array.from(new Set(userList));
-            });
-            userList = {userList:userList, type: 'userList'};
+        if (typeof message === 'object') {
+            if (ws.facestate==='connected') {
+                let objid = ws.faceobj;
+                let faceClient = faceTimeOject.get(objid);
+                faceClient.send(message);
+
+            } else {
+                let random = uuidv1();
+                radioBuffer[random] = message;
+                let res = JSON.stringify({
+                    type: 'hash',
+                    random: random
+                })
+                console.log('random is ', random);
+                ws.send(res);
+            }
+            return;
+        }
+
+        console.log('received: %s', message);
+        message = JSON.parse(message);
+        let userid = message.userid;
+        objectId = message.objectid;
+        ws.userid = userid;
+        var userList = [];
+        wss.clients.forEach(client => {
+            userList.push(client.userid);
+            userList = Array.from(new Set(userList));
+        });
+        userList = {
+            userList: userList,
+            type: 'userList'
+        };
         ws.send(JSON.stringify(userList));
 
-        if(message.type==='faceTime'&&message.state==='launch'){
-            
+        if (message.state === 'launch') {
+            ws.faceobj = objectId[0];
+            ws.facestate = 'connecting';
+            // faceTimeOject.set(userid, {
+            //     client: ws,
+            //     faceobj: objectId[0],
+            //     facestate: 'connecting'
+            // });
+            faceTimeOject.set(userid, ws);
+            //目前只考虑两人之间视频。
+            //发送请求连接消息
         }
-            if(message.random){
-                
-                if(radioBuffer[message.random]){
-                    var val = radioBuffer[message.random]
-                    wss.clients.forEach(client=>{
-                        if(objectId){
-                            if (client.readyState === WebSocket.OPEN && objectId.indexOf(client.userid)>-1) {
-                                // client.userid===objectId
-                                //不是上面这个判断语句。objectId是个数组。
-                                // client.send(message);
-                                client.send(val,()=>{
-                                    client.send(JSON.stringify(message))
-                                });
-                            }
-                        } else{
-                            console.log('没有发送objectid！');
+        if (message.state === 'accept') {
+            ws.faceobj = objectId[0];
+            ws.facestate = 'connected';
+            faceTimeOject.set(userid, ws);
+            let faceClient = faceTimeOject.get(objectId[0]);
+            faceClient.facestate = 'connected';
+            faceTimeOject.set(objectId[0], faceClient);
+            //更新自己和对方的状态为已连接。
+            //发送接受连接消息
+        }
+        if (message.state === 'break') {
+            ws.faceobj = '';
+            ws.facestate = '';
+            let faceClient = faceTimeOject.get(objectId[0]);
+            faceClient.faceobj = '';
+            faceClient.facestate = '';
+            faceTimeOject.delete(userid);
+            faceTimeOject.delete(objectId[0]);
+            //发送断开连接消息
+        }
+
+        if (message.random) {
+            if (radioBuffer[message.random]) {
+                var val = radioBuffer[message.random]
+                wss.clients.forEach(client => {
+                    if (objectId) {
+                        if (client.readyState === WebSocket.OPEN && objectId.indexOf(client.userid) > -1) {
+                            // client.userid===objectId
+                            //不是上面这个判断语句。objectId是个数组。
+                            // client.send(message);
+                            client.send(val, () => {
+                                client.send(JSON.stringify(message))
+                            });
                         }
-                    });
-                }
-            } else{
-                //发送文本消息
-                wss.clients.forEach(client=>{
-                    if(objectId){
-                        if (client.readyState === WebSocket.OPEN && objectId.indexOf(client.userid)>-1) {
-                            client.send(JSON.stringify(message));
-                        }
-                    } else{
+                    } else {
                         console.log('没有发送objectid！');
                     }
                 });
             }
-            
-            // wss.clients.forEach(function each(client) {
-            //     userList = Array.from(new Set([...userList, client.userid]));
-            //     //userList去重。
-            //     // console.log('wss is ',JSON.stringify(client))
-            //     if(objectId){
-            //         // client !== ws && 
-            //         if (client.readyState === WebSocket.OPEN && objectId.indexOf(client.userid)>-1) {
-            //             client.send(JSON.stringify(message));
-            //         }
-            //     } else{
-            //         client.send(JSON.stringify(message));
-            //     }  
-            // });
+            return;
         }
-        
 
+        //发送文本消息或者其他请求。
+        wss.clients.forEach(client => {
+            if (objectId) {
+                if (client.readyState === WebSocket.OPEN && objectId.indexOf(client.userid) > -1) {
+                    client.send(JSON.stringify(message));
+                }
+            } else {
+                console.log('没有发送objectid！');
+            }
+        });
 
-        // console.log('userid is ',userid)
-        // ws.send('your meassage is received!');
         // wss.clients.forEach(function each(client) {
-        //     client.send(data);
+        //     userList = Array.from(new Set([...userList, client.userid]));
+        //     //userList去重。
+        //     // console.log('wss is ',JSON.stringify(client))
+        //     if(objectId){
+        //         // client !== ws && 
+        //         if (client.readyState === WebSocket.OPEN && objectId.indexOf(client.userid)>-1) {
+        //             client.send(JSON.stringify(message));
+        //         }
+        //     } else{
+        //         client.send(JSON.stringify(message));
+        //     }  
         // });
-    }); //当收到消息时，在控制台打印出来，并回复一条信息
+
+
+    });
 
 });
 
-function callBack(){
+function callBack() {
     console.log('server is on')
 }
