@@ -5,7 +5,7 @@ const server = http.createServer();
 
 const wss = new WebSocket.Server({
     port: 8000,
-    server,
+    // server,
     clientTracking: true,
     backlog: 50
 }, callBack); //创建一个WebSocketServer的实例，监听端口8000
