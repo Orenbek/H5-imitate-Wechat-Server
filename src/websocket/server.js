@@ -48,34 +48,39 @@ wss.on('connection', (ws)=> {
             sendUserlist();
             //第一次连接服务器会标记客户端并且发送当前在线用户列表
         }
-        switch (message.state){
-            case 'launch': 
-                let faceClient =  faceTimeOject.get(objectId[0]);
-                if(faceClient === undefined){
-                    console.log('can not find object user!')
-                    return;
-                }
-                if(faceClient.state!=='connected'){
-                    clientFacestateConnecting(ws);
-                } else{
-                    message.state = 'reject';
-                    ws.send(JSON.stringify(message));
-                    //对方正在通话
-                }
-                break;
-            case 'accept':
-                clientAndFaceobjConnected(ws);
-                break;
-            case 'reject':
-                FacetimeConnectRejected();
-                //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
-                break;
-            case 'break':
-                FacetimeConnectBroke(ws);
-                //发送断开连接消息(待做)
-                break;
+        if(message.type==='faceTime'){
+            switch (message.state){
+                case 'launch': 
+                    let faceClient = findClientById(objectId[0])
+                    // let faceClient =  faceTimeOject.get(objectId[0]);
+                    // 这里肯定得不到faceClient啊 还没有给FaceTimeobject存任何值
+                    if(faceClient === undefined){
+                        console.log('can not find object user!')
+                        return;
+                    }
+                    if(faceClient.state!=='connected'){
+                        clientFacestateConnecting(ws);
+                    } else{
+                        message.state = 'reject';
+                        ws.send(JSON.stringify(message));
+                        //对方正在通话
+                        return;
+                    }
+                    break;
+                case 'accept':
+                    clientAndFaceobjConnected(ws);
+                    break;
+                case 'reject':
+                    FacetimeConnectRejected();
+                    //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
+                    break;
+                case 'break':
+                    FacetimeConnectBroke(ws);
+                    //发送断开连接消息
+                    break;
+            }
         }
-
+        
         if (message.random) {
             if (RVBuffer[message.random]) {
                 //其实上面这句判断可加可不加 只是为了系统更严谨壮硕一些
@@ -158,14 +163,15 @@ function sendFaceTimeStream(remoteAddr,message){
             }
         });
         if(client.faceobj){
-            let objid = client.faceobj;
-            let faceClient = faceTimeOject.get(objid);
-            if (faceClient.readyState === WebSocket.OPEN) {
-                faceClient.send(message);
+            let faceClient = faceTimeOject.get(client.faceobj);
+            if(client.facestate==='connected'&&faceClient.facestate==='connected'){
+                if (faceClient.readyState === WebSocket.OPEN) {
+                    faceClient.send(message);
+                }
+                clientAddrToObjClient.set(remoteAddr,faceClient);
+                //只要第一次发送消息的时候遍历一遍找到对象client 之后不会走这个流程。
+                // 这个算是历史遗留问题了 之前标注wsclient时候用的是userid 要是用ip可能就简单了
             }
-            clientAddrToObjClient.set(remoteAddr,faceClient);
-            //只要第一次发送消息的时候遍历一遍找到对象client 之后不会走这个流程。
-            // 这个算是历史遗留问题了 之前标注wsclient时候用的是userid 要是用ip可能就简单了
         } else{
             console.log('faceobj is not found');
         }
@@ -206,6 +212,16 @@ function sendUserlist(){
 function markClientWithId(client,message){
     let userid = message.userid;
     client.userid = userid;
+}
+
+function findClientById(id){
+    let objClient;
+    wss.clients.forEach(client=>{
+        if(client.userid===id){
+            objClient = client;
+        }
+    })
+    return objClient;
 }
 
 function clientFacestateConnecting(client){
