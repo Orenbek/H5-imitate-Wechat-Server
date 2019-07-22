@@ -24,18 +24,20 @@ const wss = new WebSocket.Server({
 
 // message.state: 'launch','accept','break','reject'
 let objectId = [];
+// 储存每次接受client消息时的objectid
 let RVBuffer = [];
-//radio and video messages buffer
+// radio and video messages buffer
 let faceTimeOject = new Map();
 let clientAddrToObjClient = new Map();
 
-wss.on('connection', (ws, req)=> {
+wss.on('connection', (ws)=> {
 
     ws.on('message',(rawMes)=> {
 
         if (typeof rawMes === 'object') {
             bufferRVmessageAndSendHash(ws,rawMes);
             return;
+            // ws客户端只会给ws服务器发送blob消息和string消息
         }
 
         console.log('received: %s', rawMes);
@@ -214,7 +216,7 @@ function clientFacestateConnecting(client){
         //     faceobj: objectId[0],
         //     facestate: 'connecting'
         // });
-        faceTimeOject.set(userid, client);
+        faceTimeOject.set(client.userid, client);
         //目前只考虑两人之间视频。
         //发送请求连接消息
 }
@@ -222,7 +224,7 @@ function clientFacestateConnecting(client){
 function clientAndFaceobjConnected(client){
     client.faceobj = objectId[0];
     client.facestate = 'connected';
-    faceTimeOject.set(userid, client);
+    faceTimeOject.set(client.userid, client);
     let faceClient = faceTimeOject.get(objectId[0]);
     faceClient.facestate = 'connected';
     faceTimeOject.set(objectId[0], faceClient);
@@ -244,7 +246,7 @@ function FacetimeConnectBroke(client){
     let faceClient = faceTimeOject.get(objectId[0]);
     delete faceClient.faceobj;
     delete faceClient.facestate;
-    faceTimeOject.delete(userid);
+    faceTimeOject.delete(client.userid);
     faceTimeOject.delete(objectId[0]);
 }
 
