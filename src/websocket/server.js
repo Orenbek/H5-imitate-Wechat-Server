@@ -1,28 +1,39 @@
 const WebSocket = require('ws'); //引入模块
 const http = require('http');
 const uuidv1 = require('uuid/v1');
+const os = require('os');
+
+let STREAM_SECRET = process.argv[2],
+    WEBSOCKET_PORT = 8000,
+	STREAM_PORT = 8001,
+	RECORD_STREAM = false;
+if (process.argv.length < 1) {
+    console.log(
+        'Usage: \n' +
+        'node server.js <secret>'
+    );
+    process.exit();
+}
 
 const wss = new WebSocket.Server({
-    port: 8000,
+    port: WEBSOCKET_PORT,
     clientTracking: true,
     backlog: 50
 }, callBack);
 
-// message.state: 'launch','accept','break'
-var objectId = [];
-var RVBuffer = [];
+
+// message.state: 'launch','accept','break','reject'
+let objectId = [];
+let RVBuffer = [];
 //radio and video messages buffer
-var faceTimeOject = new Map();
+let faceTimeOject = new Map();
+let clientAddrToObjClient = new Map();
 
 wss.on('connection', (ws, req)=> {
 
     ws.on('message',(rawMes)=> {
 
         if (typeof rawMes === 'object') {
-            if (ws.facestate==='connected') {
-                sendFaceTimeStream(ws,rawMes);
-                return;
-            }
             bufferRVmessageAndSendHash(ws,rawMes);
             return;
         }
@@ -35,27 +46,32 @@ wss.on('connection', (ws, req)=> {
             sendUserlist();
             //第一次连接服务器会标记客户端并且发送当前在线用户列表
         }
-
-        if (message.state === 'launch') {
-            let faceClient =  faceTimeOject.get(objectId[0]);
-            if(faceClient.state!=='connected'){
-                clientFacestateConnecting(ws);
-            } else{
-                message.state = 'reject';
-                ws.send(JSON.stringify(message));
-                //对方正在通话
-            }
-        }
-        if (message.state === 'accept') {
-            clientAndFaceobjConnected(ws);
-        }
-        if (message.state === 'reject'){
-            FacetimeConnectRejected();
-            //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
-        }
-        if (message.state === 'break') {
-            FacetimeConnectBroke(ws);
-            //发送断开连接消息(待做)
+        switch (message.state){
+            case 'launch': 
+                let faceClient =  faceTimeOject.get(objectId[0]);
+                if(faceClient === undefined){
+                    console.log('can not find object user!')
+                    return;
+                }
+                if(faceClient.state!=='connected'){
+                    clientFacestateConnecting(ws);
+                } else{
+                    message.state = 'reject';
+                    ws.send(JSON.stringify(message));
+                    //对方正在通话
+                }
+                break;
+            case 'accept':
+                clientAndFaceobjConnected(ws);
+                break;
+            case 'reject':
+                FacetimeConnectRejected();
+                //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
+                break;
+            case 'break':
+                FacetimeConnectBroke(ws);
+                //发送断开连接消息(待做)
+                break;
         }
 
         if (message.random) {
@@ -74,8 +90,50 @@ wss.on('connection', (ws, req)=> {
       },5000);
 });
 
+// HTTP Server to accept incomming MPEG-TS Stream from ffmpeg
+http.createServer( (request, response)=> {
+	var params = request.url.substr(1).split('/');
+	if (params[0] !== STREAM_SECRET) {
+		console.log(
+			'Failed Stream Connection: '+ request.socket.remoteAddress + ':' +
+			request.socket.remotePort + ' - wrong secret.'
+		);
+		response.end();
+	}
+
+	response.connection.setTimeout(0);
+	console.log(
+		'Stream Connected: ' + 
+		request.socket.remoteAddress + ':' +
+		request.socket.remotePort
+	);
+	request.on('data', (data)=>{
+        let remoteAddr = request.socket.remoteAddress;
+        sendFaceTimeStream(remoteAddr,data);
+		// socketServer.broadcast(data);
+		if (request.socket.recording) {
+			request.socket.recording.write(data);
+		}
+	});
+	request.on('end',()=>{
+		console.log('Stream closed');
+		if (request.socket.recording) {
+			request.socket.recording.close();
+		}
+	});
+
+	// Record the stream to a local file?
+	if (RECORD_STREAM) {
+		var path = 'recordings/' + Date.now() + '.ts';
+		request.socket.recording = fs.createWriteStream(path);
+	}
+}).listen(STREAM_PORT);
+
+let localIP = getLocalIP();
+console.log(`Listening for incomming MPEG-TS Stream on http://${localIP}:${STREAM_PORT}/<secret>`);
+
 function callBack() {
-    console.log('server is on')
+    console.log(`Awaiting WebSocket connections on ws://${localIP}:${WEBSOCKET_PORT}/`);
 }
 
 wss.broadcast = function(data) {
@@ -86,11 +144,31 @@ wss.broadcast = function(data) {
 	});
 };
 
-
-function sendFaceTimeStream(client,message){
-    let objid = client.faceobj;
-    let faceClient = faceTimeOject.get(objid);
-    faceClient.send(message);
+function sendFaceTimeStream(remoteAddr,message){
+    let faceClient = clientAddrToObjClient.get(remoteAddr);
+    if(faceClient){
+        faceClient.send(message);
+    } else{
+        let client;
+        wss.clients.forEach( (cli)=> {
+            if(cli._socket.remoteAddress===remoteAddr){
+                client = cli;
+            }
+        });
+        if(client.faceobj){
+            let objid = client.faceobj;
+            let faceClient = faceTimeOject.get(objid);
+            if (faceClient.readyState === WebSocket.OPEN) {
+                faceClient.send(message);
+            }
+            clientAddrToObjClient.set(remoteAddr,faceClient);
+            //只要第一次发送消息的时候遍历一遍找到对象client 之后不会走这个流程。
+            // 这个算是历史遗留问题了 之前标注wsclient时候用的是userid 要是用ip可能就简单了
+        } else{
+            console.log('faceobj is not found');
+        }
+    }
+    
 }
 
 function bufferRVmessageAndSendHash(client,message){
@@ -201,4 +279,20 @@ function sendStringMessage(message){
             console.log('没有发送objectid！');
         }
     });
+}
+
+function getLocalIP(){
+    let interfaces=os.networkInterfaces();
+    let ip;
+    interfaces.en0.forEach((element)=>{
+        if(element.family==='IPv4'){
+            ip = element.address;
+            //这里万万不可return foreach函数里面return 函数就变成异步的
+            // 得在函数外return
+            // 另外foreach函数中不可写异步函数 因为foreach没法封装成同步函数(用promise)
+            //foreach函数不等callback resolved
+        }
+        //貌似en0下会有多个元素 根据是不是IPv4来判断
+    })
+    return ip;
 }
