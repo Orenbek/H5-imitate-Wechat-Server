@@ -5,7 +5,8 @@ const os = require('os');
 
 let STREAM_SECRET = process.argv[2],
     WEBSOCKET_PORT = 8000,
-	STREAM_PORT = 8001,
+    STREAMIN_PORT = 8001,
+    STREAMOUT_PORT = 8002,
 	RECORD_STREAM = false;
 if (process.argv.length < 1) {
     console.log(
@@ -21,6 +22,11 @@ const wss = new WebSocket.Server({
     backlog: 50
 }, callBack);
 
+const facewss = new WebSocket.Server({
+    port: STREAMOUT_PORT,
+    clientTracking: true,
+    backlog: 50
+}, callBack);
 
 // message.state: 'launch','accept','break','reject'
 let objectId = [];
@@ -75,7 +81,7 @@ wss.on('connection', (ws)=> {
                     //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
                     break;
                 case 'break':
-                    FacetimeConnectBroke(ws);
+                    (ws);
                     //发送断开连接消息
                     break;
             }
@@ -95,6 +101,13 @@ wss.on('connection', (ws)=> {
     setInterval(()=>{
         sendUserlist();
       },5000);
+});
+
+facewss.on('connection',(ws)=>{
+    ws.on('message',(rawMes)=> {
+        let message = JSON.parse(rawMes);
+        objectId = message.objectid;
+    });
 });
 
 // HTTP Server to accept incomming MPEG-TS Stream from ffmpeg
@@ -134,10 +147,10 @@ http.createServer( (request, response)=> {
 		var path = 'recordings/' + Date.now() + '.ts';
 		request.socket.recording = fs.createWriteStream(path);
 	}
-}).listen(STREAM_PORT);
+}).listen(STREAMIN_PORT);
 
 let localIP = getLocalIP();
-console.log(`Listening for incomming MPEG-TS Stream on http://${localIP}:${STREAM_PORT}/<secret>`);
+console.log(`Listening for incomming MPEG-TS Stream on http://${localIP}:${STREAMIN_PORT}/<secret>`);
 
 function callBack() {
     console.log(`Awaiting WebSocket connections on ws://${localIP}:${WEBSOCKET_PORT}/`);
