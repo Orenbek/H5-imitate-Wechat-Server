@@ -3,18 +3,12 @@ const http = require('http');
 const uuidv1 = require('uuid/v1');
 const os = require('os');
 
-let STREAM_SECRET = process.argv[2],
-    WEBSOCKET_PORT = 8000,
+let bbClient;
+
+let WEBSOCKET_PORT = 8000,
     STREAMIN_PORT = 8001,
     STREAMOUT_PORT = 8002,
 	RECORD_STREAM = false;
-if (process.argv.length < 1) {
-    console.log(
-        'Usage: \n' +
-        'node server.js <secret>'
-    );
-    process.exit();
-}
 
 const wss = new WebSocket.Server({
     port: WEBSOCKET_PORT,
@@ -54,38 +48,6 @@ wss.on('connection', (ws)=> {
             sendUserlist();
             //第一次连接服务器会标记客户端并且发送当前在线用户列表
         }
-        if(message.type==='faceTime'){
-            switch (message.state){
-                case 'launch': 
-                    let faceClient = findClientById(objectId[0])
-                    // let faceClient =  faceTimeOject.get(objectId[0]);
-                    // 这里肯定得不到faceClient啊 还没有给FaceTimeobject存任何值
-                    if(faceClient === undefined){
-                        console.log('can not find object user!')
-                        return;
-                    }
-                    if(faceClient.state!=='connected'){
-                        clientFacestateConnecting(ws);
-                    } else{
-                        message.state = 'reject';
-                        ws.send(JSON.stringify(message));
-                        //对方正在通话
-                        return;
-                    }
-                    break;
-                case 'accept':
-                    clientAndFaceobjConnected(ws);
-                    break;
-                case 'reject':
-                    FacetimeConnectRejected();
-                    //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
-                    break;
-                case 'break':
-                    (ws);
-                    //发送断开连接消息
-                    break;
-            }
-        }
         
         if (message.random) {
             if (RVBuffer[message.random]) {
@@ -98,29 +60,58 @@ wss.on('connection', (ws)=> {
         //发送文本消息或者其他请求。
         sendStringMessage(message);
     });
-    setInterval(()=>{
-        sendUserlist();
-      },5000);
+    // setInterval(()=>{
+    //     sendUserlist();
+    //   },5000);
 });
 
 facewss.on('connection',(ws)=>{
     ws.on('message',(rawMes)=> {
         let message = JSON.parse(rawMes);
         objectId = message.objectid;
+        if(message.type==='init'){
+            markClientWithId(ws,message);
+        }
+        switch (message.state){
+            case 'launch': 
+                bbClient = ws;
+                let faceClient = findClientById(objectId[0]);
+                // let faceClient =  faceTimeOject.get(objectId[0]);
+                // 这里肯定得不到faceClient啊 还没有给FaceTimeobject存任何值
+                if(faceClient === undefined){
+                    console.log('can not find object user!')
+                    return;
+                }
+                if(faceClient.state!=='connected'){
+                    clientFacestateConnecting(ws);
+                } else{
+                    message.state = 'reject';
+                    ws.send(JSON.stringify(message));
+                    //对方正在通话
+                    return;
+                }
+                break;
+            case 'cancle':
+                clientFacestateCancle(ws);
+                break;
+            case 'accept':
+                clientAndFaceobjConnected(ws);
+                break;
+            case 'reject':
+                facetimeConnectRejected();
+                //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
+                break;
+            case 'break':
+                FacetimeConnectBroke(ws);
+                //发送断开连接消息
+                break;
+        }
+        sendStringMessage(message);
     });
 });
 
 // HTTP Server to accept incomming MPEG-TS Stream from ffmpeg
 http.createServer( (request, response)=> {
-	var params = request.url.substr(1).split('/');
-	if (params[0] !== STREAM_SECRET) {
-		console.log(
-			'Failed Stream Connection: '+ request.socket.remoteAddress + ':' +
-			request.socket.remotePort + ' - wrong secret.'
-		);
-		response.end();
-	}
-
 	response.connection.setTimeout(0);
 	console.log(
 		'Stream Connected: ' + 
@@ -153,7 +144,8 @@ let localIP = getLocalIP();
 console.log(`Listening for incomming MPEG-TS Stream on http://${localIP}:${STREAMIN_PORT}/<secret>`);
 
 function callBack() {
-    console.log(`Awaiting WebSocket connections on ws://${localIP}:${WEBSOCKET_PORT}/`);
+    console.log(`Awaiting WebSocket connections on ws://${localIP}:${WEBSOCKET_PORT}/
+    Awaiting WebSocket FaceTime connections on ws://${localIP}:${STREAMOUT_PORT}`);
 }
 
 wss.broadcast = function(data) {
@@ -165,30 +157,31 @@ wss.broadcast = function(data) {
 };
 
 function sendFaceTimeStream(remoteAddr,message){
-    let faceClient = clientAddrToObjClient.get(remoteAddr);
-    if(faceClient){
-        faceClient.send(message);
-    } else{
-        let client;
-        wss.clients.forEach( (cli)=> {
-            if(cli._socket.remoteAddress===remoteAddr){
-                client = cli;
-            }
-        });
-        if(client.faceobj){
-            let faceClient = faceTimeOject.get(client.faceobj);
-            if(client.facestate==='connected'&&faceClient.facestate==='connected'){
-                if (faceClient.readyState === WebSocket.OPEN) {
-                    faceClient.send(message);
-                }
-                clientAddrToObjClient.set(remoteAddr,faceClient);
-                //只要第一次发送消息的时候遍历一遍找到对象client 之后不会走这个流程。
-                // 这个算是历史遗留问题了 之前标注wsclient时候用的是userid 要是用ip可能就简单了
-            }
-        } else{
-            console.log('faceobj is not found');
-        }
-    }
+    bbClient.send(message);
+    // let faceClient = clientAddrToObjClient.get(remoteAddr);
+    // if(faceClient){
+    //     faceClient.send(message);
+    // } else{
+    //     let client;
+    //     facewss.clients.forEach( (cli)=> {
+    //         if(cli._socket.remoteAddress===remoteAddr){
+    //             client = cli;
+    //         }
+    //     });
+    //     if(client.faceobj){
+    //         let faceClient = faceTimeOject.get(client.faceobj);
+    //         if(client.facestate==='connected'&&faceClient.facestate==='connected'){
+    //             if (faceClient.readyState === WebSocket.OPEN) {
+    //                 faceClient.send(message);
+    //             }
+    //             clientAddrToObjClient.set(remoteAddr,faceClient);
+    //             //只要第一次发送消息的时候遍历一遍找到对象client 之后不会走这个流程。
+    //             // 这个算是历史遗留问题了 之前标注wsclient时候用的是userid 要是用ip可能就简单了
+    //         }
+    //     } else{
+    //         console.log('faceobj is not found');
+    //     }
+    // }
     
 }
 
@@ -229,7 +222,7 @@ function markClientWithId(client,message){
 
 function findClientById(id){
     let objClient;
-    wss.clients.forEach(client=>{
+    facewss.clients.forEach(client=>{
         if(client.userid===id){
             objClient = client;
         }
@@ -238,16 +231,23 @@ function findClientById(id){
 }
 
 function clientFacestateConnecting(client){
-        client.faceobj = objectId[0];
-        client.facestate = 'connecting';
-        // faceTimeOject.set(userid, {
-        //     client: client,
-        //     faceobj: objectId[0],
-        //     facestate: 'connecting'
-        // });
-        faceTimeOject.set(client.userid, client);
-        //目前只考虑两人之间视频。
-        //发送请求连接消息
+    client.faceobj = objectId[0];
+    client.facestate = 'connecting';
+    // faceTimeOject.set(userid, {
+    //     client: client,
+    //     faceobj: objectId[0],
+    //     facestate: 'connecting'
+    // });
+    faceTimeOject.set(client.userid, client);
+    //目前只考虑两人之间视频。
+    //发送请求连接消息
+}
+
+function clientFacestateCancle(client){
+    let faceClient = faceTimeOject.get(client.userid)
+    delete faceClient.faceobj;
+    delete faceClient.facestate;
+    faceTimeOject.delete(client.userid);
 }
 
 function clientAndFaceobjConnected(client){
@@ -261,7 +261,7 @@ function clientAndFaceobjConnected(client){
     //发送接受连接消息
 }
 
-function FacetimeConnectRejected(){
+function facetimeConnectRejected(){
     let faceClient = faceTimeOject.get(objectId[0]);
     delete faceClient.faceobj;
     delete faceClient.facestate;
