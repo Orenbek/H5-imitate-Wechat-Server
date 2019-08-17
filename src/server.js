@@ -3,12 +3,10 @@ const http = require('http');
 const uuidv1 = require('uuid/v1');
 const os = require('os');
 
-let bbClient;
-
-let WEBSOCKET_PORT = 8000,
+const WEBSOCKET_PORT = 8000,
     STREAMIN_PORT = 8001,
     STREAMOUT_PORT = 8002,
-	RECORD_STREAM = false;
+    RECORD_STREAM = false;
 
 const wss = new WebSocket.Server({
     port: WEBSOCKET_PORT,
@@ -30,12 +28,12 @@ let RVBuffer = [];
 let faceTimeOject = new Map();
 let clientAddrToObjClient = new Map();
 
-wss.on('connection', (ws)=> {
+wss.on('connection', (ws) => {
 
-    ws.on('message',(rawMes)=> {
+    ws.on('message', (rawMes) => {
 
         if (typeof rawMes === 'object') {
-            bufferRVmessageAndSendHash(ws,rawMes);
+            bufferRVmessageAndSendHash(ws, rawMes);
             return;
             // ws客户端只会给ws服务器发送blob消息和string消息
         }
@@ -43,12 +41,12 @@ wss.on('connection', (ws)=> {
         console.log('received: %s', rawMes);
         let message = JSON.parse(rawMes);
         objectId = message.objectid;
-        if(message.type==='init'){
-            markClientWithId(ws,message);
+        if (message.type === 'init') {
+            markClientWithId(ws, message);
             sendUserlist();
             //第一次连接服务器会标记客户端并且发送当前在线用户列表
         }
-        
+
         if (message.random) {
             if (RVBuffer[message.random]) {
                 //其实上面这句判断可加可不加 只是为了系统更严谨壮硕一些
@@ -60,31 +58,30 @@ wss.on('connection', (ws)=> {
         //发送文本消息或者其他请求。
         sendStringMessage(message);
     });
-    // setInterval(()=>{
-    //     sendUserlist();
-    //   },5000);
+    setInterval(() => {
+        sendUserlist();
+    }, 5000);
 });
 
-facewss.on('connection',(ws)=>{
-    ws.on('message',(rawMes)=> {
+facewss.on('connection', (ws) => {
+    ws.on('message', (rawMes) => {
         let message = JSON.parse(rawMes);
         objectId = message.objectid;
-        if(message.type==='init'){
-            markClientWithId(ws,message);
+        if (message.type === 'init') {
+            markClientWithId(ws, message);
         }
-        switch (message.state){
-            case 'launch': 
-                bbClient = ws;
+        switch (message.state) {
+            case 'launch':
                 let faceClient = findClientById(objectId[0]);
                 // let faceClient =  faceTimeOject.get(objectId[0]);
                 // 这里肯定得不到faceClient啊 还没有给FaceTimeobject存任何值
-                if(faceClient === undefined){
+                if (faceClient === undefined) {
                     console.log('can not find object user!')
                     return;
                 }
-                if(faceClient.state!=='connected'){
+                if (faceClient.state !== 'connected') {
                     clientFacestateConnecting(ws);
-                } else{
+                } else {
                     message.state = 'reject';
                     ws.send(JSON.stringify(message));
                     //对方正在通话
@@ -111,36 +108,36 @@ facewss.on('connection',(ws)=>{
 });
 
 // HTTP Server to accept incomming MPEG-TS Stream from ffmpeg
-http.createServer( (request, response)=> {
-	response.connection.setTimeout(0);
-	console.log(
-		'Stream Connected: ' + 
-		request.socket.remoteAddress + ':' +
-		request.socket.remotePort
-	);
-	request.on('data', (data)=>{
-        let remoteAddr = request.socket.remoteAddress;
-        sendFaceTimeStream(remoteAddr,data);
-		// socketServer.broadcast(data);
-		if (request.socket.recording) {
-			request.socket.recording.write(data);
-		}
-	});
-	request.on('end',()=>{
-		console.log('Stream closed');
-		if (request.socket.recording) {
-			request.socket.recording.close();
-		}
-	});
+http.createServer((request, response) => {
+    response.connection.setTimeout(0);
+    console.log(
+        'Stream Connected: ' +
+        request.socket.remoteAddress + ':' +
+        request.socket.remotePort
+    );
+    request.on('data', (data) => {
+        const remoteAddr = request.socket.remoteAddress;
+        sendFaceTimeStream(remoteAddr, data);
+        facewss.broadcast(data);
+        if (request.socket.recording) {
+            request.socket.recording.write(data);
+        }
+    });
+    request.on('end', () => {
+        console.log('Stream closed');
+        if (request.socket.recording) {
+            request.socket.recording.close();
+        }
+    });
 
-	// Record the stream to a local file?
-	if (RECORD_STREAM) {
-		var path = 'recordings/' + Date.now() + '.ts';
-		request.socket.recording = fs.createWriteStream(path);
-	}
+    // Record the stream to a local file?
+    if (RECORD_STREAM) {
+        var path = 'recordings/' + Date.now() + '.ts';
+        request.socket.recording = fs.createWriteStream(path);
+    }
 }).listen(STREAMIN_PORT);
 
-let localIP = getLocalIP();
+const localIP = getLocalIP();
 console.log(`Listening for incomming MPEG-TS Stream on http://${localIP}:${STREAMIN_PORT}/<secret>`);
 
 function callBack() {
@@ -148,44 +145,43 @@ function callBack() {
     Awaiting WebSocket FaceTime connections on ws://${localIP}:${STREAMOUT_PORT}`);
 }
 
-wss.broadcast = function(data) {
-	wss.clients.forEach( (client)=> {
-		if (client.readyState === WebSocket.OPEN) {
-			client.send(data);
-		}
-	});
+facewss.broadcast = function (data) {
+    facewss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(data);
+        }
+    });
 };
 
-function sendFaceTimeStream(remoteAddr,message){
-    bbClient.send(message);
-    // let faceClient = clientAddrToObjClient.get(remoteAddr);
-    // if(faceClient){
-    //     faceClient.send(message);
-    // } else{
-    //     let client;
-    //     facewss.clients.forEach( (cli)=> {
-    //         if(cli._socket.remoteAddress===remoteAddr){
-    //             client = cli;
-    //         }
-    //     });
-    //     if(client.faceobj){
-    //         let faceClient = faceTimeOject.get(client.faceobj);
-    //         if(client.facestate==='connected'&&faceClient.facestate==='connected'){
-    //             if (faceClient.readyState === WebSocket.OPEN) {
-    //                 faceClient.send(message);
-    //             }
-    //             clientAddrToObjClient.set(remoteAddr,faceClient);
-    //             //只要第一次发送消息的时候遍历一遍找到对象client 之后不会走这个流程。
-    //             // 这个算是历史遗留问题了 之前标注wsclient时候用的是userid 要是用ip可能就简单了
-    //         }
-    //     } else{
-    //         console.log('faceobj is not found');
-    //     }
-    // }
-    
+function sendFaceTimeStream(remoteAddr, message) {
+    let faceClient = clientAddrToObjClient.get(remoteAddr);
+    if (faceClient) {
+        faceClient.send(message);
+    } else {
+        let client;
+        facewss.clients.forEach((cli) => {
+            if (cli._socket.remoteAddress === remoteAddr) {
+                client = cli;
+            }
+        });
+        if (client.faceobj) {
+            let faceClient = faceTimeOject.get(client.faceobj);
+            if (client.facestate === 'connected' && faceClient.facestate === 'connected') {
+                if (faceClient.readyState === WebSocket.OPEN) {
+                    faceClient.send(message);
+                }
+                clientAddrToObjClient.set(remoteAddr, faceClient);
+                //只要第一次发送消息的时候遍历一遍找到对象client 之后不会走这个流程。
+                // 这个算是历史遗留问题了 之前标注wsclient时候用的是userid 要是用ip可能就简单了
+            }
+        } else {
+            console.log('faceobj is not found');
+        }
+    }
+
 }
 
-function bufferRVmessageAndSendHash(client,message){
+function bufferRVmessageAndSendHash(client, message) {
     let random = uuidv1();
     RVBuffer[random] = message;
     let res = JSON.stringify({
@@ -195,10 +191,10 @@ function bufferRVmessageAndSendHash(client,message){
     client.send(res);
 }
 
-function sendUserlist(){
+function sendUserlist() {
     var list = [];
     wss.clients.forEach(client => {
-        if(client.userid){
+        if (client.userid) {
             list.push(client.userid);
         }
         list = Array.from(new Set(list));
@@ -208,29 +204,29 @@ function sendUserlist(){
         userList: list,
         type: 'userList'
     };
-    wss.clients.forEach( (client)=> {
-		if (client.readyState === WebSocket.OPEN) {
-			client.send(JSON.stringify(mes));
-		}
-	});
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(mes));
+        }
+    });
 }
 
-function markClientWithId(client,message){
+function markClientWithId(client, message) {
     let userid = message.userid;
     client.userid = userid;
 }
 
-function findClientById(id){
+function findClientById(id) {
     let objClient;
-    facewss.clients.forEach(client=>{
-        if(client.userid===id){
+    facewss.clients.forEach(client => {
+        if (client.userid === id) {
             objClient = client;
         }
     })
     return objClient;
 }
 
-function clientFacestateConnecting(client){
+function clientFacestateConnecting(client) {
     client.faceobj = objectId[0];
     client.facestate = 'connecting';
     // faceTimeOject.set(userid, {
@@ -243,14 +239,14 @@ function clientFacestateConnecting(client){
     //发送请求连接消息
 }
 
-function clientFacestateCancle(client){
+function clientFacestateCancle(client) {
     let faceClient = faceTimeOject.get(client.userid)
     delete faceClient.faceobj;
     delete faceClient.facestate;
     faceTimeOject.delete(client.userid);
 }
 
-function clientAndFaceobjConnected(client){
+function clientAndFaceobjConnected(client) {
     client.faceobj = objectId[0];
     client.facestate = 'connected';
     faceTimeOject.set(client.userid, client);
@@ -261,7 +257,7 @@ function clientAndFaceobjConnected(client){
     //发送接受连接消息
 }
 
-function facetimeConnectRejected(){
+function facetimeConnectRejected() {
     let faceClient = faceTimeOject.get(objectId[0]);
     delete faceClient.faceobj;
     delete faceClient.facestate;
@@ -269,7 +265,7 @@ function facetimeConnectRejected(){
     //发送拒绝接受消息 使对方的状态改为空。注：此时我的的状态不要改
 }
 
-function FacetimeConnectBroke(client){
+function FacetimeConnectBroke(client) {
     delete client.faceobj;
     delete client.facestate;
     let faceClient = faceTimeOject.get(objectId[0]);
@@ -279,7 +275,7 @@ function FacetimeConnectBroke(client){
     faceTimeOject.delete(objectId[0]);
 }
 
-function sendBlobAndMessageToObjClient(message){
+function sendBlobAndMessageToObjClient(message) {
     var val = RVBuffer[message.random]
     wss.clients.forEach(client => {
         if (objectId) {
@@ -300,7 +296,7 @@ function sendBlobAndMessageToObjClient(message){
     });
 }
 
-function sendStringMessage(message){
+function sendStringMessage(message) {
     wss.clients.forEach(client => {
         if (objectId) {
             if (client.readyState === WebSocket.OPEN && objectId.indexOf(client.userid) > -1) {
@@ -312,11 +308,11 @@ function sendStringMessage(message){
     });
 }
 
-function getLocalIP(){
-    let interfaces=os.networkInterfaces();
+function getLocalIP() {
+    let interfaces = os.networkInterfaces();
     let ip;
-    interfaces.en0.forEach((element)=>{
-        if(element.family==='IPv4'){
+    interfaces.en0.forEach((element) => {
+        if (element.family === 'IPv4') {
             ip = element.address;
             //这里万万不可return foreach函数里面return 函数就变成异步的
             // 得在函数外return
